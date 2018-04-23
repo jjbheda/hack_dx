@@ -225,6 +225,10 @@ public class Main {
 
     private Set<String> classesInMainDex = null;
 
+    private static List<Set<String>> classesInSecondaryDexes = null;
+
+    private static List<FileNameFilter> filtersInSecondaryDexes = null;
+
     private List<byte[]> dexOutputArrays = new ArrayList<byte[]>();
 
     private OutputStreamWriter humanOutWriter = null;
