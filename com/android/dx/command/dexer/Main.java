@@ -1227,6 +1227,31 @@ public class Main {
     }
 
     /**
+     * A filter for secondary dex
+     */
+    private static class SecondryDexListFilter implements FileNameFilter {
+        private final int index;
+
+        public SecondryDexListFilter(int index) {
+            this.index = index;
+        }
+
+        @Override
+        public boolean accept(String fullPath) {
+            Set<String> classesInSecondaryDex = classesInSecondaryDexes.get(index);
+            if (fullPath.endsWith(".class")) {
+                String path = fixPath(fullPath);
+                for (String classPrefix : classesInSecondaryDex) {
+                    if (path.startsWith(classPrefix)) {
+                        return !classesInMainDex.contains(path);
+                    }
+                }
+            }
+            return false;
+        }
+    }
+
+    /**
      * A best effort conservative filter for when file path can <b>not</b> be trusted.
      */
     private class BestEffortMainDexListFilter implements FileNameFilter {
