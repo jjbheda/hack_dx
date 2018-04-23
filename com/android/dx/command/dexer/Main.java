@@ -363,11 +363,6 @@ public class Main {
             readPathsFromFile(args.mainDexListFile, classesInMainDex);
         }
 
-        if (args.secondaryDexListFiles != null) {
-            classesInSecondaryDexes = readSecondaryDexePathFromFile(args.secondaryDexListFiles);
-        }
-
-
         dexOutPool = Executors.newFixedThreadPool(args.numThreads);
 
         if (!processAllFiles()) {
@@ -427,32 +422,6 @@ public class Main {
         }
 
         return 0;
-    }
-
-    private static List<Set<String>> readSecondaryDexePathFromFile(String fileName) throws IOException {
-        List<Set<String>> allsdPaths = new ArrayList<Set<String>>();
-        Set<String> sdPaths = null;
-        BufferedReader bfr = null;
-        try {
-            FileReader fr = new FileReader(fileName);
-            bfr = new BufferedReader(fr);
-            String line;
-            while(null != (line = bfr.readLine())) {
-                if (line.startsWith("--secondary-dex-begin")) {
-                    sdPaths = new HashSet<String>();
-                } else if (line.startsWith("--secondary-dex-end")) {
-                    allsdPaths.add(sdPaths);
-                } else if (!"".equals(line)) {
-                    sdPaths.add(fixPath(line));
-                }
-            }
-
-        } finally {
-            if (bfr != null) {
-                bfr.close();
-            }
-        }
-        return allsdPaths;
     }
 
     private static String getDexFileName(int i) {
@@ -595,22 +564,6 @@ public class Main {
                     }
 
                     rotateDexFile();
-                }
-
-                // forced in secondary dex
-                if (args.secondaryDexListFiles != null) {
-                    filtersInSecondaryDexes = new ArrayList<FileNameFilter>();
-
-                    for (int i = 0; i < classesInSecondaryDexes.size(); i++) {
-                        filtersInSecondaryDexes.add(new SecondryDexListFilter(i));
-                    }
-
-                    for (int i = 0; i < fileNames.length; i++) {
-                        for (int j = 0; j < classesInSecondaryDexes.size(); j++) {
-                            processOne(fileNames[i], filtersInSecondaryDexes.get(j));
-                            createDexFile();
-                        }
-                    }
                 }
 
                 // remaining files
@@ -1287,8 +1240,6 @@ public class Main {
 
         private static final String MAIN_DEX_LIST_OPTION = "--main-dex-list";
 
-        private static final String SECONDARY_DEXES_LIST_OPTION = "--secondary-dexes-list";
-
         private static final String MULTI_DEX_OPTION = "--multi-dex";
 
         private static final String NUM_THREADS_OPTION = "--num-threads";
@@ -1393,9 +1344,6 @@ public class Main {
         /** Optional file containing a list of class files containing classes to be forced in main
          * dex */
         public String mainDexListFile = null;
-
-        /** Optional file containing a list of class files containing classes to be forced in secondary dex */
-        public String secondaryDexListFiles = null;
 
         /** Produce the smallest possible main dex. Ignored unless multiDex is true and
          * mainDexListFile is specified and non empty. */
