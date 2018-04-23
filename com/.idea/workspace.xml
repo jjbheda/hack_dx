@@ -36,16 +36,6 @@
         </entry>
       </file>
       <file leaf-file-name="Main.java" pinned="false" current-in-tab="false">
-        <entry file="file://$PROJECT_DIR$/android/dx/command/dexer/Main.java">
-          <provider selected="true" editor-type-id="text-editor">
-            <state relative-caret-position="19695">
-              <caret line="1405" column="13" lean-forward="true" selection-start-line="1405" selection-start-column="13" selection-end-line="1405" selection-end-column="13" />
-              <folding />
-            </state>
-          </provider>
-        </entry>
-      </file>
-      <file leaf-file-name="Main.java" pinned="false" current-in-tab="false">
         <entry file="file://$PROJECT_DIR$/android/dx/command/Main.java">
           <provider selected="true" editor-type-id="text-editor">
             <state relative-caret-position="240">
@@ -55,11 +45,21 @@
           </provider>
         </entry>
       </file>
-      <file leaf-file-name=".gitignore" pinned="false" current-in-tab="true">
+      <file leaf-file-name=".gitignore" pinned="false" current-in-tab="false">
         <entry file="file://$PROJECT_DIR$/.gitignore">
           <provider selected="true" editor-type-id="text-editor">
             <state relative-caret-position="15">
               <caret line="1" column="12" lean-forward="false" selection-start-line="1" selection-start-column="12" selection-end-line="1" selection-end-column="12" />
+              <folding />
+            </state>
+          </provider>
+        </entry>
+      </file>
+      <file leaf-file-name="Main.java" pinned="false" current-in-tab="true">
+        <entry file="file://$PROJECT_DIR$/android/dx/command/dexer/Main.java">
+          <provider selected="true" editor-type-id="text-editor">
+            <state relative-caret-position="1671">
+              <caret line="1392" column="57" lean-forward="false" selection-start-line="1392" selection-start-column="57" selection-end-line="1392" selection-end-column="57" />
               <folding />
             </state>
           </provider>
@@ -195,8 +195,8 @@
   </component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
-      <recent name="$PROJECT_DIR$/android/dx/command" />
       <recent name="$PROJECT_DIR$/android/dx/command/dexer" />
+      <recent name="$PROJECT_DIR$/android/dx/command" />
       <recent name="$PROJECT_DIR$" />
     </key>
   </component>
@@ -368,14 +368,6 @@
         </state>
       </provider>
     </entry>
-    <entry file="file://$PROJECT_DIR$/android/dx/command/dexer/Main.java">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="19695">
-          <caret line="1405" column="13" lean-forward="true" selection-start-line="1405" selection-start-column="13" selection-end-line="1405" selection-end-column="13" />
-          <folding />
-        </state>
-      </provider>
-    </entry>
     <entry file="file://$PROJECT_DIR$/android/dx/command/Main.java">
       <provider selected="true" editor-type-id="text-editor">
         <state relative-caret-position="240">
@@ -388,6 +380,14 @@
       <provider selected="true" editor-type-id="text-editor">
         <state relative-caret-position="15">
           <caret line="1" column="12" lean-forward="false" selection-start-line="1" selection-start-column="12" selection-end-line="1" selection-end-column="12" />
+          <folding />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/android/dx/command/dexer/Main.java">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="1671">
+          <caret line="1392" column="57" lean-forward="false" selection-start-line="1392" selection-start-column="57" selection-end-line="1392" selection-end-column="57" />
           <folding />
         </state>
       </provider>
