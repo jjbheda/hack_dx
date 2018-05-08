@@ -179,17 +179,17 @@ public class Main {
      * {@code null-ok;} map of resources to include in the output, or
      * {@code null} if resources are being ignored
      */
-    private TreeMap<String, byte[]> outputResources;
+    private TreeMap<String, byte[]> outputResources;        //若为资源文件，则添加到outputResources的Map中
 
     /** Library .dex files to merge into the output .dex. */
-    private final List<byte[]> libraryDexBuffers = new ArrayList<byte[]>();
+    private final List<byte[]> libraryDexBuffers = new ArrayList<byte[]>();     //若为classes.dex文件，则添加到libraryDexBuffers列表中
 
     /** Thread pool object used for multi-thread class translation. */
-    private ExecutorService classTranslatorPool;
+    private ExecutorService classTranslatorPool;            //类转化线程池classTranslatorPool。用于将原始class文件转换成ClassDefItem
 
     /** Single thread executor, for collecting results of parallel translation,
      * and adding classes to dex file in original input file order. */
-    private ExecutorService classDefItemConsumer;
+    private ExecutorService classDefItemConsumer;               //dex写入线程池classDefItemConsumer。用于将转换后的类依次写到dex中
 
     /** Futures for {@code classDefItemConsumer} tasks. */
     private List<Future<Boolean>> addToDexFutures =
@@ -198,9 +198,11 @@ public class Main {
     /** Thread pool object used for multi-thread dex conversion (to byte array).
      * Used in combination with multi-dex support, to allow outputing
      * a completed dex file, in parallel with continuing processing. */
-    private ExecutorService dexOutPool;
+    private ExecutorService dexOutPool;             //dex字节码化线程池dexOutPool。用于将dex列表转化为byte[]字节数组，并添加到字节码列表中
 
     /** Futures for {@code dexOutPool} task. */
+    private List<Future<byte[]>> dexOutputFutures = new ArrayList<Future<byte[]>>();
+
     private List<Future<byte[]>> dexOutputFutures = new ArrayList<Future<byte[]>>();
 
     /** Lock object used to to coordinate dex file rotation, and
@@ -210,7 +212,7 @@ public class Main {
     /** Record the number if method indices "reserved" for files
      * committed to translation in the context of the current dex
      * file, but not yet added. */
-    private int maxMethodIdsInProcess = 0;
+    private int maxMethodIdsInProcess = 0;      //类转化到生成dex中间过程中的最大方法数。
 
     /** Record the number if field indices "reserved" for files
      * committed to translation in the context of the current dex
@@ -234,6 +236,8 @@ public class Main {
     private OutputStreamWriter humanOutWriter = null;
 
     private final DxContext context;
+
+    private boolean isSecSondectorProcessed = false;
 
     public Main(DxContext context) {
         this.context = context;
@@ -362,17 +366,16 @@ public class Main {
 
         assert !args.incremental;
 
-        if (args.mainDexListFile != null) {
+        if (args.mainDexListFile != null) {                          //主dex所有类
             classesInMainDex = new HashSet<String>();
             readPathsFromFile(args.mainDexListFile, classesInMainDex);
         }
 
-        if (args.secondaryDexListFiles != null) {
+        if (args.secondaryDexListFiles != null) {                    //seconddex 所有类
             classesInSecondaryDexes = readSecondaryDexePathFromFile(args.secondaryDexListFiles);
         }
 
-
-        dexOutPool = Executors.newFixedThreadPool(args.numThreads);
+        dexOutPool = Executors.newFixedThreadPool(args.numThreads);        //输出dex文件的线程池 用于将dex列表转化为byte[]字节数组，并添加到字节码列表中
 
         if (!processAllFiles()) {
             return 1;
@@ -384,7 +387,6 @@ public class Main {
 
         if (outputDex != null) {
             // this array is null if no classes were defined
-
             dexOutputFutures.add(dexOutPool.submit(new DexWriter(outputDex)));
 
             // Effectively free up the (often massive) DexFile memory.
@@ -395,7 +397,6 @@ public class Main {
             if (!dexOutPool.awaitTermination(600L, TimeUnit.SECONDS)) {
                 throw new RuntimeException("Timed out waiting for dex writer threads.");
             }
-
             for (Future<byte[]> f : dexOutputFutures) {
                 dexOutputArrays.add(f.get());
             }
@@ -418,6 +419,7 @@ public class Main {
                 return 3;
             }
         } else if (args.outName != null) {
+
             File outDir = new File(args.outName);
             assert outDir.isDirectory();
             for (int i = 0; i < dexOutputArrays.size(); i++) {
@@ -600,7 +602,6 @@ public class Main {
 
                     rotateDexFile();
                 }
-
                 // forced in secondary dex
                 if (args.secondaryDexListFiles != null) {
                     filtersInSecondaryDexes = new ArrayList<FileNameFilter>();
@@ -612,14 +613,15 @@ public class Main {
                     for (int i = 0; i < fileNames.length; i++) {
                         for (int j = 0; j < classesInSecondaryDexes.size(); j++) {
                             processOne(fileNames[i], filtersInSecondaryDexes.get(j));
-                            createDexFile();
+                            isSecSondectorProcessed = true;
                         }
                     }
+
                 }
 
                 // remaining files
                 for (int i = 0; i < fileNames.length; i++) {
-                    processOne(fileNames[i], new NotFilter(mainPassFilter));
+                    processOne(fileNames[i], new PowerfulNotFilter(new NotFilter(mainPassFilter)));
                 }
             } else {
                 // without --main-dex-list
@@ -649,7 +651,6 @@ public class Main {
                     int count = errors.incrementAndGet();
                     if (count < 10) {
                         if (args.debug) {
-                            context.err.println("Uncaught translation error:");
                             ex.getCause().printStackTrace(context.err);
                         } else {
                             context.err.println("Uncaught translation error: " + ex.getCause());
@@ -694,6 +695,29 @@ public class Main {
         return true;
     }
 
+
+    private static class PowerfulNotFilter implements FileNameFilter {
+        private final FileNameFilter filter;
+
+        private PowerfulNotFilter(FileNameFilter filter) {
+            this.filter = filter;
+        }
+
+        @Override
+        public boolean accept(String path) {
+            return filter.accept(path) && !inSecondaryDexes(path);
+        }
+
+        private boolean inSecondaryDexes(String path) {
+            for (FileNameFilter filter : filtersInSecondaryDexes) {
+                if (filter.accept(path)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+    }
     private void createDexFile() {
         outputDex = new DexFile(args.dexOptions);
 
@@ -745,7 +769,6 @@ public class Main {
      * @return whether processing was successful
      */
     private boolean processFileBytes(String name, long lastModified, byte[] bytes) {
-
         boolean isClass = name.endsWith(".class");
         boolean isClassesDex = name.equals(DexFormat.DEX_IN_JAR_NAME);
         boolean keepResources = (outputResources != null);
@@ -1229,7 +1252,7 @@ public class Main {
     /**
      * A filter for secondary dex
      */
-    private static class SecondryDexListFilter implements FileNameFilter {
+    private class SecondryDexListFilter implements FileNameFilter {
         private final int index;
 
         public SecondryDexListFilter(int index) {
@@ -1636,6 +1659,8 @@ public class Main {
                     mainDexListFile = parser.getLastValue();
                 } else if (parser.isArg(MINIMAL_MAIN_DEX_OPTION)) {
                     minimalMainDex = true;
+                } else if (parser.isArg(SECONDARY_DEXES_LIST_OPTION + "=")) {
+                    secondaryDexListFiles = parser.getLastValue();
                 } else if (parser.isArg("--set-max-idx-number=")) { // undocumented test option
                     maxNumberOfIdxPerDex = Integer.parseInt(parser.getLastValue());
                 } else if(parser.isArg(INPUT_LIST_OPTION + "=")) {
@@ -1704,6 +1729,12 @@ public class Main {
             if (mainDexListFile != null && !multiDex) {
                 context.err.println(MAIN_DEX_LIST_OPTION + " is only supported in combination with "
                     + MULTI_DEX_OPTION);
+                throw new UsageException();
+            }
+
+            if (secondaryDexListFiles != null && !multiDex) {
+                System.err.println(SECONDARY_DEXES_LIST_OPTION + " is only supported in combination with "
+                        + MULTI_DEX_OPTION);
                 throw new UsageException();
             }
 
@@ -1865,7 +1896,8 @@ public class Main {
         }
 
         private Boolean call(DirectClassFile cf) {
-
+            //我理解的是，这个是还未放到线程池classTranslatorPool中进行转换处理的Class类的最大方法数。
+            // 其预估值为constantPoolSize + cf.getMethods().size() + MAX_METHOD_ADDED_DURING_DEX_CREATION
             int maxMethodIdsInClass = 0;
             int maxFieldIdsInClass = 0;
 
@@ -1897,7 +1929,7 @@ public class Main {
                     while(((numMethodIds + maxMethodIdsInClass + maxMethodIdsInProcess
                             > args.maxNumberOfIdxPerDex) ||
                            (numFieldIds + maxFieldIdsInClass + maxFieldIdsInProcess
-                            > args.maxNumberOfIdxPerDex))) {
+                            > args.maxNumberOfIdxPerDex)) || isSecSondectorProcessed) {
 
                         if (maxMethodIdsInProcess > 0 || maxFieldIdsInProcess > 0) {
                             // There are classes in the translation phase that
@@ -1933,10 +1965,11 @@ public class Main {
             // Submit class to translation phase.
             Future<ClassDefItem> cdif = classTranslatorPool.submit(
                     new ClassTranslatorTask(name, bytes, cf));
+
             Future<Boolean> res = classDefItemConsumer.submit(new ClassDefItemConsumer(
                     name, cdif, maxMethodIdsInClass, maxFieldIdsInClass));
             addToDexFutures.add(res);
-
+            isSecSondectorProcessed = false;
             return true;
         }
     }
