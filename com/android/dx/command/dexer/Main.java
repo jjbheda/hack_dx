@@ -203,8 +203,6 @@ public class Main {
     /** Futures for {@code dexOutPool} task. */
     private List<Future<byte[]>> dexOutputFutures = new ArrayList<Future<byte[]>>();
 
-    private List<Future<byte[]>> dexOutputFutures = new ArrayList<Future<byte[]>>();
-
     /** Lock object used to to coordinate dex file rotation, and
      * multi-threaded translation. */
     private Object dexRotationLock = new Object();
