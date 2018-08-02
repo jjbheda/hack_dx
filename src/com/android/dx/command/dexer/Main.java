@@ -46,7 +46,7 @@ import com.android.dx.rop.cst.CstString;
 import com.android.dx.rop.cst.CstType;
 import com.android.dx.rop.type.Prototype;
 import com.android.dx.rop.type.Type;
-
+import java.util.Iterator;
 import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -79,6 +79,7 @@ import java.util.jar.Attributes;
 import java.util.jar.JarEntry;
 import java.util.jar.JarOutputStream;
 import java.util.jar.Manifest;
+import java.util.Map.Entry;
 
 /**
  * Main class for the class file translator.
@@ -91,7 +92,7 @@ public class Main {
      * File extension of a {@code .dex} file.
      */
     private static final String DEX_EXTENSION = ".dex";
-
+    private static List<String> dexNameList = new ArrayList();
     /**
      * File name prefix of a {@code .dex} file automatically loaded in an
      * archive.
@@ -181,14 +182,20 @@ public class Main {
      */
     private TreeMap<String, byte[]> outputResources;        //若为资源文件，则添加到outputResources的Map中
 
-    /** Library .dex files to merge into the output .dex. */
+    /**
+     * Library .dex files to merge into the output .dex.
+     */
     private final List<byte[]> libraryDexBuffers = new ArrayList<byte[]>();     //若为classes.dex文件，则添加到libraryDexBuffers列表中
 
-    /** Thread pool object used for multi-thread class translation. */
+    /**
+     * Thread pool object used for multi-thread class translation.
+     */
     private ExecutorService classTranslatorPool;            //类转化线程池classTranslatorPool。用于将原始class文件转换成ClassDefItem
 
-    /** Single thread executor, for collecting results of parallel translation,
-     * and adding classes to dex file in original input file order. */
+    /**
+     * Single thread executor, for collecting results of parallel translation,
+     * and adding classes to dex file in original input file order.
+     */
     private ExecutorService classDefItemConsumer;               //dex写入线程池classDefItemConsumer。用于将转换后的类依次写到dex中
 
     /** Futures for {@code classDefItemConsumer} tasks. */
@@ -197,11 +204,14 @@ public class Main {
 
     /** Thread pool object used for multi-thread dex conversion (to byte array).
      * Used in combination with multi-dex support, to allow outputing
-     * a completed dex file, in parallel with continuing processing. */
+     * a completed dex file, in parallel with continuing processing.
+     */
     private ExecutorService dexOutPool;             //dex字节码化线程池dexOutPool。用于将dex列表转化为byte[]字节数组，并添加到字节码列表中
 
-    /** Futures for {@code dexOutPool} task. */
-    private List<Future<byte[]>> dexOutputFutures = new ArrayList<Future<byte[]>>();
+    /**
+     * Futures for {@code dexOutPool} task.
+     */
+    private List<HashMap<String, Future<byte[]>>> dexOutputFutures = new ArrayList<>();
 
     /** Lock object used to to coordinate dex file rotation, and
      * multi-threaded translation. */
@@ -209,7 +219,8 @@ public class Main {
 
     /** Record the number if method indices "reserved" for files
      * committed to translation in the context of the current dex
-     * file, but not yet added. */
+     * file, but not yet added.
+     */
     private int maxMethodIdsInProcess = 0;      //类转化到生成dex中间过程中的最大方法数。
 
     /** Record the number if field indices "reserved" for files
@@ -225,17 +236,17 @@ public class Main {
 
     private Set<String> classesInMainDex = null;
 
-    private static List<Set<String>> classesInSecondaryDexes = null;
+    private static List<Set<String>> classesInSubDexes = null;
 
-    private static List<FileNameFilter> filtersInSecondaryDexes = null;
+    private static List<FileNameFilter> filtersInSubDexes = null;
 
-    private List<byte[]> dexOutputArrays = new ArrayList<byte[]>();
+    private List<HashMap<String, byte[]>> dexOutputArrays = new ArrayList<>();
 
     private OutputStreamWriter humanOutWriter = null;
 
     private final DxContext context;
 
-    private boolean isSecSondectorProcessed = false;
+    private boolean isSubDexProcessed = false;
 
     public Main(DxContext context) {
         this.context = context;
@@ -364,13 +375,15 @@ public class Main {
 
         assert !args.incremental;
 
-        if (args.mainDexListFile != null) {                          //主dex所有类
+        if (args.mainDexListFile != null) {
             classesInMainDex = new HashSet<String>();
             readPathsFromFile(args.mainDexListFile, classesInMainDex);
         }
+        //系统默认必须要有的 classes.dex
+        dexNameList.add("classes");
 
-        if (args.secondaryDexListFiles != null) {                    //seconddex 所有类
-            classesInSecondaryDexes = readSecondaryDexePathFromFile(args.secondaryDexListFiles);
+        if (args.subDexesListFiles != null) {
+            classesInSubDexes = getSubDexesPath(args.subDexesListFiles);
         }
 
         dexOutPool = Executors.newFixedThreadPool(args.numThreads);        //输出dex文件的线程池 用于将dex列表转化为byte[]字节数组，并添加到字节码列表中
@@ -385,7 +398,10 @@ public class Main {
 
         if (outputDex != null) {
             // this array is null if no classes were defined
-            dexOutputFutures.add(dexOutPool.submit(new DexWriter(outputDex)));
+
+            HashMap<String, Future<byte[]>> hs = new HashMap();
+            hs.put("unkown", dexOutPool.submit(new DexWriter(outputDex)));
+            dexOutputFutures.add(hs);
 
             // Effectively free up the (often massive) DexFile memory.
             outputDex = null;
@@ -395,8 +411,15 @@ public class Main {
             if (!dexOutPool.awaitTermination(600L, TimeUnit.SECONDS)) {
                 throw new RuntimeException("Timed out waiting for dex writer threads.");
             }
-            for (Future<byte[]> f : dexOutputFutures) {
-                dexOutputArrays.add(f.get());
+
+            for (HashMap<String, Future<byte[]>> hashMap : dexOutputFutures) {
+                Iterator<Entry<String, Future<byte[]>>> entries = hashMap.entrySet().iterator();
+                while (entries.hasNext()) {
+                    Map.Entry<String, Future<byte[]>> entry = entries.next();
+                    HashMap<String, byte[]> hs = new HashMap<>();
+                    hs.put(entry.getKey(), entry.getValue().get());
+                    dexOutputArrays.add(hs);
+                }
             }
 
         } catch (InterruptedException ex) {
@@ -407,25 +430,22 @@ public class Main {
             throw new RuntimeException("Unexpected exception in dex writer thread");
         }
 
-        if (args.jarOutput) {
-            for (int i = 0; i < dexOutputArrays.size(); i++) {
-                outputResources.put(getDexFileName(i),
-                        dexOutputArrays.get(i));
-            }
-
-            if (!createJar(args.outName)) {
-                return 3;
-            }
-        } else if (args.outName != null) {
+        if (args.outName != null) {
 
             File outDir = new File(args.outName);
             assert outDir.isDirectory();
-            for (int i = 0; i < dexOutputArrays.size(); i++) {
-                OutputStream out = new FileOutputStream(new File(outDir, getDexFileName(i)));
-                try {
-                    out.write(dexOutputArrays.get(i));
-                } finally {
-                    closeOutput(out);
+
+            for (HashMap<String, byte[]> hashMap : dexOutputArrays) {
+                Iterator<Entry<String, byte[]>> entries = hashMap.entrySet().iterator();
+                while (entries.hasNext()) {
+                    Map.Entry<String, byte[]> entry = entries.next();
+                   // 生成的dex名字" + entry.getKey
+                    OutputStream out = new FileOutputStream(new File(outDir, entry.getKey()));
+                    try {
+                        out.write(entry.getValue());
+                    } finally {
+                        closeOutput(out);
+                    }
                 }
             }
         }
@@ -433,21 +453,25 @@ public class Main {
         return 0;
     }
 
-    private static List<Set<String>> readSecondaryDexePathFromFile(String fileName) throws IOException {
-        List<Set<String>> allsdPaths = new ArrayList<Set<String>>();
-        Set<String> sdPaths = null;
+    private static List<Set<String>> getSubDexesPath(String fileName) throws IOException {
+        List<Set<String>> dexPaths = new ArrayList<Set<String>>();
+        Set<String> subDexClassPaths = null;
         BufferedReader bfr = null;
         try {
             FileReader fr = new FileReader(fileName);
             bfr = new BufferedReader(fr);
             String line;
-            while(null != (line = bfr.readLine())) {
-                if (line.startsWith("--secondary-dex-begin")) {
-                    sdPaths = new HashSet<String>();
-                } else if (line.startsWith("--secondary-dex-end")) {
-                    allsdPaths.add(sdPaths);
+            while (null != (line = bfr.readLine())) {
+                if (line.startsWith("--subdex-start")) {
+                    subDexClassPaths = new HashSet<String>();
+                    String[] dexNameStr = line.split("\\|");
+                    if (dexNameStr.length >= 2) {
+                        dexNameList.add(dexNameStr[1]);
+                    }
+                } else if (line.startsWith("--subdex-over")) {
+                    dexPaths.add(subDexClassPaths);
                 } else if (!"".equals(line)) {
-                    sdPaths.add(fixPath(line));
+                    subDexClassPaths.add(fixPath(line));
                 }
             }
 
@@ -456,16 +480,10 @@ public class Main {
                 bfr.close();
             }
         }
-        return allsdPaths;
+        return dexPaths;
     }
 
-    private static String getDexFileName(int i) {
-        if (i == 0) {
-            return DexFormat.DEX_IN_JAR_NAME;
-        } else {
-            return DEX_PREFIX + (i + 1) + DEX_EXTENSION;
-        }
-    }
+
 
     private static void readPathsFromFile(String fileName, Collection<String> paths) throws IOException {
         BufferedReader bfr = null;
@@ -585,8 +603,6 @@ public class Main {
                 }
 
                 if (args.minimalMainDex) {
-                    // start second pass directly in a secondary dex file.
-
                     // Wait for classes in progress to complete
                     synchronized(dexRotationLock) {
                         while(maxMethodIdsInProcess > 0 || maxFieldIdsInProcess > 0) {
@@ -600,18 +616,18 @@ public class Main {
 
                     rotateDexFile();
                 }
-                // forced in secondary dex
-                if (args.secondaryDexListFiles != null) {
-                    filtersInSecondaryDexes = new ArrayList<FileNameFilter>();
+                // tranfer for sub dex
+                if (args.subDexesListFiles != null) {
+                    filtersInSubDexes = new ArrayList<FileNameFilter>();
 
-                    for (int i = 0; i < classesInSecondaryDexes.size(); i++) {
-                        filtersInSecondaryDexes.add(new SecondryDexListFilter(i));
+                    for (int i = 0; i < classesInSubDexes.size(); i++) {
+                        filtersInSubDexes.add(new SubDexListFilter(i));
                     }
 
                     for (int i = 0; i < fileNames.length; i++) {
-                        for (int j = 0; j < classesInSecondaryDexes.size(); j++) {
-                            processOne(fileNames[i], filtersInSecondaryDexes.get(j));
-                            isSecSondectorProcessed = true;
+                        for (int j = 0; j < classesInSubDexes.size(); j++) {
+                            processOne(fileNames[i], filtersInSubDexes.get(j));
+                            isSubDexProcessed = true;
                         }
                     }
 
@@ -649,6 +665,7 @@ public class Main {
                     int count = errors.incrementAndGet();
                     if (count < 10) {
                         if (args.debug) {
+                            context.err.println("Uncaught translation error:");
                             ex.getCause().printStackTrace(context.err);
                         } else {
                             context.err.println("Uncaught translation error: " + ex.getCause());
@@ -703,11 +720,11 @@ public class Main {
 
         @Override
         public boolean accept(String path) {
-            return filter.accept(path) && !inSecondaryDexes(path);
+            return filter.accept(path) && !isSubDexClass(path);
         }
 
-        private boolean inSecondaryDexes(String path) {
-            for (FileNameFilter filter : filtersInSecondaryDexes) {
+        private boolean isSubDexClass(String path) {
+            for (FileNameFilter filter : filtersInSubDexes) {
                 if (filter.accept(path)) {
                     return true;
                 }
@@ -716,6 +733,7 @@ public class Main {
         }
 
     }
+
     private void createDexFile() {
         outputDex = new DexFile(args.dexOptions);
 
@@ -724,15 +742,21 @@ public class Main {
         }
     }
 
+    private int dexIndex = 0;
+
     private void rotateDexFile() {
         if (outputDex != null) {
             if (dexOutPool != null) {
-                dexOutputFutures.add(dexOutPool.submit(new DexWriter(outputDex)));
+                HashMap<String, Future<byte[]>> hs = new HashMap();
+                hs.put(dexNameList.get(dexIndex), dexOutPool.submit(new DexWriter(outputDex)));
+                dexOutputFutures.add(hs);
             } else {
-                dexOutputArrays.add(writeDex(outputDex));
+                HashMap<String, byte[]> hashMap = new  HashMap();
+                hashMap.put("", writeDex(outputDex));
+                dexOutputArrays.add(hashMap);
             }
         }
-
+        dexIndex++;
         createDexFile();
     }
 
@@ -767,6 +791,7 @@ public class Main {
      * @return whether processing was successful
      */
     private boolean processFileBytes(String name, long lastModified, byte[] bytes) {
+
         boolean isClass = name.endsWith(".class");
         boolean isClassesDex = name.equals(DexFormat.DEX_IN_JAR_NAME);
         boolean keepResources = (outputResources != null);
@@ -1248,21 +1273,21 @@ public class Main {
     }
 
     /**
-     * A filter for secondary dex
+     * A filter for sub dex
      */
-    private class SecondryDexListFilter implements FileNameFilter {
+    private class SubDexListFilter implements FileNameFilter {
         private final int index;
 
-        public SecondryDexListFilter(int index) {
+        public SubDexListFilter(int index) {
             this.index = index;
         }
 
         @Override
         public boolean accept(String fullPath) {
-            Set<String> classesInSecondaryDex = classesInSecondaryDexes.get(index);
+            Set<String> classesInSubDex = classesInSubDexes.get(index);
             if (fullPath.endsWith(".class")) {
                 String path = fixPath(fullPath);
-                for (String classPrefix : classesInSecondaryDex) {
+                for (String classPrefix : classesInSubDex) {
                     if (path.startsWith(classPrefix)) {
                         return !classesInMainDex.contains(path);
                     }
@@ -1337,7 +1362,8 @@ public class Main {
 
         private static final String MAIN_DEX_LIST_OPTION = "--main-dex-list";
 
-        private static final String SECONDARY_DEXES_LIST_OPTION = "--secondary-dexes-list";
+        //增加配置文件支持
+        private static final String SUB_DEXES_LIST_OPTION = "--sub-dexes-list";
 
         private static final String MULTI_DEX_OPTION = "--multi-dex";
 
@@ -1444,11 +1470,12 @@ public class Main {
          * dex */
         public String mainDexListFile = null;
 
-        /** Optional file containing a list of class files containing classes to be forced in secondary dex */
-        public String secondaryDexListFiles = null;
+        public String subDexesListFiles = null;
 
-        /** Produce the smallest possible main dex. Ignored unless multiDex is true and
-         * mainDexListFile is specified and non empty. */
+        /**
+         * Produce the smallest possible main dex. Ignored unless multiDex is true and
+         * mainDexListFile is specified and non empty.
+         */
         public boolean minimalMainDex = false;
 
         public int maxNumberOfIdxPerDex = DexFormat.MAX_MEMBER_IDX + 1;
@@ -1657,8 +1684,8 @@ public class Main {
                     mainDexListFile = parser.getLastValue();
                 } else if (parser.isArg(MINIMAL_MAIN_DEX_OPTION)) {
                     minimalMainDex = true;
-                } else if (parser.isArg(SECONDARY_DEXES_LIST_OPTION + "=")) {
-                    secondaryDexListFiles = parser.getLastValue();
+                } else if (parser.isArg(SUB_DEXES_LIST_OPTION + "=")) {
+                    subDexesListFiles = parser.getLastValue();
                 } else if (parser.isArg("--set-max-idx-number=")) { // undocumented test option
                     maxNumberOfIdxPerDex = Integer.parseInt(parser.getLastValue());
                 } else if(parser.isArg(INPUT_LIST_OPTION + "=")) {
@@ -1725,13 +1752,12 @@ public class Main {
             }
 
             if (mainDexListFile != null && !multiDex) {
-                context.err.println(MAIN_DEX_LIST_OPTION + " is only supported in combination with "
-                    + MULTI_DEX_OPTION);
+                context.err.println(MAIN_DEX_LIST_OPTION + " is only supported in combination with " + MULTI_DEX_OPTION);
                 throw new UsageException();
             }
 
-            if (secondaryDexListFiles != null && !multiDex) {
-                System.err.println(SECONDARY_DEXES_LIST_OPTION + " is only supported in combination with "
+            if (subDexesListFiles != null && !multiDex) {
+                System.err.println(SUB_DEXES_LIST_OPTION + " is only supported in combination with "
                         + MULTI_DEX_OPTION);
                 throw new UsageException();
             }
@@ -1894,8 +1920,7 @@ public class Main {
         }
 
         private Boolean call(DirectClassFile cf) {
-            //我理解的是，这个是还未放到线程池classTranslatorPool中进行转换处理的Class类的最大方法数。
-            // 其预估值为constantPoolSize + cf.getMethods().size() + MAX_METHOD_ADDED_DURING_DEX_CREATION
+
             int maxMethodIdsInClass = 0;
             int maxFieldIdsInClass = 0;
 
@@ -1926,8 +1951,8 @@ public class Main {
                     // dex file.
                     while(((numMethodIds + maxMethodIdsInClass + maxMethodIdsInProcess
                             > args.maxNumberOfIdxPerDex) ||
-                           (numFieldIds + maxFieldIdsInClass + maxFieldIdsInProcess
-                            > args.maxNumberOfIdxPerDex)) || isSecSondectorProcessed) {
+                            (numFieldIds + maxFieldIdsInClass + maxFieldIdsInProcess
+                                    > args.maxNumberOfIdxPerDex)) || isSubDexProcessed) {
 
                         if (maxMethodIdsInProcess > 0 || maxFieldIdsInProcess > 0) {
                             // There are classes in the translation phase that
@@ -1963,11 +1988,10 @@ public class Main {
             // Submit class to translation phase.
             Future<ClassDefItem> cdif = classTranslatorPool.submit(
                     new ClassTranslatorTask(name, bytes, cf));
-
             Future<Boolean> res = classDefItemConsumer.submit(new ClassDefItemConsumer(
                     name, cdif, maxMethodIdsInClass, maxFieldIdsInClass));
             addToDexFutures.add(res);
-            isSecSondectorProcessed = false;
+            isSubDexProcessed = false;
             return true;
         }
     }

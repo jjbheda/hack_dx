@@ -55,6 +55,7 @@ class Path {
         this.definition = definition;
         for (String filePath : definition.split(Pattern.quote(File.pathSeparator))) {
             try {
+                System.err.println("filePath" + filePath);
                 addElement(getClassPathElement(new File(filePath)));
             } catch (IOException e) {
                 throw new IOException("Wrong classpath: " + e.getMessage(), e);

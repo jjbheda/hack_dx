@@ -73,6 +73,7 @@ public class MainDexListBuilder {
         int argIndex = 0;
         boolean keepAnnotated = true;
         while (argIndex < args.length -2) {
+            System.err.println("MainDexListBuilder argIndex--> " + argIndex);
             if (args[argIndex].equals(DISABLE_ANNOTATION_RESOLUTION_WORKAROUND)) {
                 keepAnnotated = false;
             } else {
@@ -151,7 +152,7 @@ public class MainDexListBuilder {
 
     private static void printList(Set<String> fileNames) {
         for (String fileName : fileNames) {
-            System.out.println(fileName);
+            System.err.println("maindexList fileName"+fileName);
         }
     }
 
